@@ -311,6 +311,7 @@ class MatchMonitor:
 
         else:
             # ── Subsequent visit: check for new goals ────────────────────────
+            # Score delta — record each goal we witnessed with timing
             if t1_score > row["team1_score"]:
                 self.db.record_goal(
                     self.match_id, {"T": 1, "M": minute, "H": half}
@@ -339,7 +340,9 @@ class MatchMonitor:
 
         # ── Finished? ────────────────────────────────────────────────────────
         if status == "Match finished":
-            self.db.finish_match(self.match_id)
+            # Pass the authoritative scores from the API so finish_match
+            # can set result correctly even if goals were missed mid-game
+            self.db.finish_match(self.match_id, t1_score, t2_score)
             return   # do not reschedule
 
         # ── Log progress ─────────────────────────────────────────────────────

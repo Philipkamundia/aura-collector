@@ -296,10 +296,13 @@ class Database:
             logger.error(f"record_goal({match_id}): {e}")
             return False
 
-    def finish_match(self, match_id: int) -> bool:
+    def finish_match(self, match_id: int, api_t1: int = None, api_t2: int = None) -> bool:
         """
-        Mark match finished and populate derived columns in one shot.
-        Reads goal_data from the DB to derive result + first goal fields.
+        Mark match finished and populate derived columns.
+
+        api_t1 / api_t2 — the final scores direct from the API.
+        These override whatever is in the DB, ensuring the result is correct
+        even when goals were missed between polls.
         """
         row = self.get_match(match_id)
         if not row:
@@ -307,16 +310,20 @@ class Database:
 
         goals  = row["goal_data"] if isinstance(row["goal_data"], list) \
                  else json.loads(row["goal_data"])
-        t1     = row["team1_score"]
-        t2     = row["team2_score"]
-        result = "H" if t1 > t2 else ("A" if t2 > t1 else "D")
 
-        fgt = goals[0]["T"] if goals else None
-        fgm = goals[0]["M"] if goals else None
+        # Use API scores if provided, fall back to what's in the DB
+        t1 = api_t1 if api_t1 is not None else row["team1_score"]
+        t2 = api_t2 if api_t2 is not None else row["team2_score"]
+
+        result = "H" if t1 > t2 else ("A" if t2 > t1 else "D")
+        fgt    = goals[0]["T"] if goals else None
+        fgm    = goals[0]["M"] if goals else None
 
         sql = """
         UPDATE matches
         SET status          = 1,
+            team1_score     = %s,
+            team2_score     = %s,
             result          = %s,
             first_goal_team = %s,
             first_goal_min  = %s
@@ -324,7 +331,7 @@ class Database:
         """
         try:
             with self.cursor() as cur:
-                cur.execute(sql, (result, fgt, fgm, match_id))
+                cur.execute(sql, (t1, t2, result, fgt, fgm, match_id))
             logger.info(
                 f"Finished: [{match_id}] "
                 f"{row['team1_name']} {t1}–{t2} {row['team2_name']} "
