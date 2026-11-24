@@ -442,8 +442,9 @@ class MatchMonitor:
         # ── Finished? ────────────────────────────────────────────────────────
         if status == "Match finished":
             # Pass the authoritative scores from the API so finish_match
-            # can set result correctly even if goals were missed mid-game
-            self.db.finish_match(self.match_id, t1_score, t2_score)
+            # can set result correctly even if goals were missed mid-game.
+            # Also pass elapsed seconds (SC.TS) so we know actual game duration.
+            self.db.finish_match(self.match_id, t1_score, t2_score, elapsed)
             return   # do not reschedule
 
         # ── Log progress ─────────────────────────────────────────────────────

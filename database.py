@@ -114,6 +114,11 @@ CREATE TABLE IF NOT EXISTS matches (
     -- in-play signal
     max_odd_locks    SMALLINT    NOT NULL DEFAULT 0,
 
+    -- timing
+    -- elapsed_seconds: SC.TS at the moment "Match finished" was detected
+    -- 5400 = exactly 90 min; higher = extra time / stoppage
+    elapsed_seconds  INTEGER     DEFAULT NULL,
+
     -- housekeeping
     status           SMALLINT    NOT NULL DEFAULT 0,    -- 0=live 1=finished
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -178,6 +183,7 @@ MIGRATIONS = [
     ("odds_cs",          "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_cs          JSONB DEFAULT '{}'"),
     ("odds_fg_team1",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team1    NUMERIC(7,4) DEFAULT NULL"),
     ("odds_fg_team2",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team2    NUMERIC(7,4) DEFAULT NULL"),
+    ("elapsed_seconds",  "ALTER TABLE matches ADD COLUMN IF NOT EXISTS elapsed_seconds  INTEGER DEFAULT NULL"),
 ]
 
 
@@ -423,7 +429,7 @@ class Database:
             logger.error(f"record_goal({match_id}): {e}")
             return False
 
-    def finish_match(self, match_id: int, api_t1: int = None, api_t2: int = None) -> bool:
+    def finish_match(self, match_id: int, api_t1: int = None, api_t2: int = None, elapsed: int = None) -> bool:
         """
         Mark match finished and populate derived columns.
 
@@ -453,12 +459,13 @@ class Database:
             team2_score     = %s,
             result          = %s,
             first_goal_team = %s,
-            first_goal_min  = %s
+            first_goal_min  = %s,
+            elapsed_seconds = %s
         WHERE id = %s
         """
         try:
             with self.cursor() as cur:
-                cur.execute(sql, (t1, t2, result, fgt, fgm, match_id))
+                cur.execute(sql, (t1, t2, result, fgt, fgm, elapsed, match_id))
             logger.info(
                 f"Finished: [{match_id}] "
                 f"{row['team1_name']} {t1}–{t2} {row['team2_name']} "
