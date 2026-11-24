@@ -460,7 +460,7 @@ def main():
         format=config.LOG_FORMAT,
     )
 
-    db = Database(config.DATABASE_FILE)
+    db = Database(config.DATABASE_URL)
     engine = Engine(db)
     engine.run()
 
