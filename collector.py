@@ -129,21 +129,53 @@ def _parse_scheduler(sc: dict) -> dict:
 
 def _parse_odds(ge: list) -> dict:
     """
-    Extract the key pre-match markets from the GE grouped-events list.
+    Extract all pre-match markets from the GE grouped-events list.
 
     Markets decoded:
-      G=1   → 1X2        (T=1 home, T=2 draw, T=3 away)
-      G=17  → Totals     (T=9 over, T=10 under; CE=1 = main line)
-      G=2   → Handicap   (T=7 home, T=8 away;  CE=1 = main line)
-      G=14  → BTTS       (T=182 yes, T=183 no)
-
-    Returns flat dict of all odds fields plus computed overround / implied probs.
+      G=1    1X2            T=1 home, T=2 draw, T=3 away
+      G=2    Asian handicap T=7 home, T=8 away (CE=1 = main line)
+      G=5    HT result      T=184 home, T=185 draw, T=186 away, T=187 no goal
+      G=8    Double chance  (not stored — derivable from 1X2)
+      G=11   Correct score  T=15 1-0, T=16 2-0, T=17 3-0, T=18 0-1,
+                            T=19 1-1, T=20 0-2, T=21 3-1+, T=22 2-1, T=23 0-0
+      G=14   BTTS           T=182 yes, T=183 no
+      G=15   Team totals    T=11 over, T=12 under (CE=1 = main line)
+      G=17   Total goals    T=9 over, T=10 under — ALL lines stored + main flat
+      G=18   HT/FT          T=188 HH, T=189 DD, T=190 AA
+      G=19   First goal     T=180 team1, T=181 team2
+      G=20   Win to nil     T=388 team1 P=1, T=389 team2 P=1, T=390 0-0 P=1
+      G=43   Score first    T=504 team1, T=505 team2
+      G=44   HT draw        T=506 yes, T=507 no
+      G=62   Indiv totals   T=13 team1 over, T=14 team1 under (CE=1 main line)
     """
+    import json as _json
+
     result = {
+        # 1X2
         "odds_home": None, "odds_draw": None, "odds_away": None,
+        # Totals
+        "odds_total_lines": "[]",   # all lines as JSON
         "odds_total_line": None, "odds_over": None, "odds_under": None,
+        # Handicap
         "odds_hcap_line": None, "odds_hcap_home": None, "odds_hcap_away": None,
+        # BTTS
         "odds_btts_yes": None, "odds_btts_no": None,
+        # HT result
+        "odds_ht_home": None, "odds_ht_draw": None,
+        "odds_ht_away": None, "odds_ht_nogoal": None,
+        # HT/FT
+        "odds_htft_hh": None, "odds_htft_dd": None, "odds_htft_aa": None,
+        # Score first
+        "odds_first_team1": None, "odds_first_team2": None,
+        # HT draw
+        "odds_ht_draw_yes": None, "odds_ht_draw_no": None,
+        # Win to nil / 0-0
+        "odds_win_nil_1": None, "odds_win_nil_2": None, "odds_no_goal": None,
+        # Correct score
+        "odds_cs": "{}",
+        # First goal market
+        "odds_fg_team1": None, "odds_fg_team2": None,
+        # Derived
         "overround": None,
         "implied_home": None, "implied_draw": None, "implied_away": None,
     }
@@ -151,43 +183,102 @@ def _parse_odds(ge: list) -> dict:
     for group in ge:
         gid    = group.get("G")
         events = group.get("E", [])
-        # Flatten: each row in E can itself be a list
-        flat = [
-            e for row in events
-            for e in (row if isinstance(row, list) else [row])
-        ]
-        # Only use unlocked odds (B=False → market is open, game hasn't started)
-        open_odds = [e for e in flat if not e.get("B", False)]
-        if not open_odds:
+        flat   = [e for row in events for e in (row if isinstance(row, list) else [row])]
+        # Only use unlocked odds (B=False → market is open)
+        open_e = [e for e in flat if not e.get("B", False)]
+        if not open_e:
             continue
 
+        by_t = {e["T"]: e for e in open_e if "T" in e}
+
         if gid == 1 and result["odds_home"] is None:
-            by_t = {e["T"]: e["C"] for e in open_odds if "T" in e and "C" in e}
-            result["odds_home"] = by_t.get(1)
-            result["odds_draw"] = by_t.get(2)
-            result["odds_away"] = by_t.get(3)
+            result["odds_home"] = by_t.get(1, {}).get("C")
+            result["odds_draw"] = by_t.get(2, {}).get("C")
+            result["odds_away"] = by_t.get(3, {}).get("C")
 
         elif gid == 17 and result["odds_total_line"] is None:
-            # Prefer CE=1 (main line); fall back to first available
-            main = [e for e in open_odds if e.get("CE") == 1] or open_odds
-            by_t = {e["T"]: e for e in main if "T" in e}
-            if 9 in by_t and 10 in by_t:
-                result["odds_total_line"] = by_t[9].get("P")
-                result["odds_over"]       = by_t[9].get("C")
-                result["odds_under"]      = by_t[10].get("C")
+            # Collect ALL lines
+            over_e  = [e for e in open_e if e.get("T") == 9 and e.get("P") is not None]
+            under_e = [e for e in open_e if e.get("T") == 10 and e.get("P") is not None]
+            over_by_p  = {e["P"]: e["C"] for e in over_e}
+            under_by_p = {e["P"]: e["C"] for e in under_e}
+            all_lines = []
+            for p in sorted(over_by_p):
+                all_lines.append({
+                    "line":  p,
+                    "over":  over_by_p[p],
+                    "under": under_by_p.get(p),
+                })
+            result["odds_total_lines"] = _json.dumps(all_lines)
+            # Main line (CE=1)
+            main = [e for e in open_e if e.get("CE") == 1] or open_e
+            main_by_t = {e["T"]: e for e in main if "T" in e}
+            if 9 in main_by_t and 10 in main_by_t:
+                result["odds_total_line"] = main_by_t[9].get("P")
+                result["odds_over"]       = main_by_t[9].get("C")
+                result["odds_under"]      = main_by_t[10].get("C")
 
         elif gid == 2 and result["odds_hcap_line"] is None:
-            main = [e for e in open_odds if e.get("CE") == 1] or open_odds
-            by_t = {e["T"]: e for e in main if "T" in e}
-            if 7 in by_t and 8 in by_t:
-                result["odds_hcap_line"] = by_t[7].get("P")
-                result["odds_hcap_home"] = by_t[7].get("C")
-                result["odds_hcap_away"] = by_t[8].get("C")
+            main = [e for e in open_e if e.get("CE") == 1] or open_e
+            main_by_t = {e["T"]: e for e in main if "T" in e}
+            if 7 in main_by_t and 8 in main_by_t:
+                result["odds_hcap_line"] = main_by_t[7].get("P")
+                result["odds_hcap_home"] = main_by_t[7].get("C")
+                result["odds_hcap_away"] = main_by_t[8].get("C")
 
         elif gid == 14 and result["odds_btts_yes"] is None:
-            by_t = {e["T"]: e["C"] for e in open_odds if "T" in e and "C" in e}
-            result["odds_btts_yes"] = by_t.get(182)
-            result["odds_btts_no"]  = by_t.get(183)
+            result["odds_btts_yes"] = by_t.get(182, {}).get("C")
+            result["odds_btts_no"]  = by_t.get(183, {}).get("C")
+
+        elif gid == 5 and result["odds_ht_home"] is None:
+            result["odds_ht_home"]   = by_t.get(184, {}).get("C")
+            result["odds_ht_draw"]   = by_t.get(185, {}).get("C")
+            result["odds_ht_away"]   = by_t.get(186, {}).get("C")
+            result["odds_ht_nogoal"] = by_t.get(187, {}).get("C")
+
+        elif gid == 18 and result["odds_htft_hh"] is None:
+            result["odds_htft_hh"] = by_t.get(188, {}).get("C")
+            result["odds_htft_dd"] = by_t.get(189, {}).get("C")
+            result["odds_htft_aa"] = by_t.get(190, {}).get("C")
+
+        elif gid == 43 and result["odds_first_team1"] is None:
+            result["odds_first_team1"] = by_t.get(504, {}).get("C")
+            result["odds_first_team2"] = by_t.get(505, {}).get("C")
+
+        elif gid == 44 and result["odds_ht_draw_yes"] is None:
+            result["odds_ht_draw_yes"] = by_t.get(506, {}).get("C")
+            result["odds_ht_draw_no"]  = by_t.get(507, {}).get("C")
+
+        elif gid == 20 and result["odds_win_nil_1"] is None:
+            # T=388 P=1 = team1 win to nil, T=389 P=1 = team2, T=390 P=1 = 0-0
+            for e in open_e:
+                t = e.get("T")
+                p = e.get("P")
+                if t == 388 and p == 1:
+                    result["odds_win_nil_1"] = e.get("C")
+                elif t == 389 and p == 1:
+                    result["odds_win_nil_2"] = e.get("C")
+                elif t == 390 and p == 1:
+                    result["odds_no_goal"] = e.get("C")
+
+        elif gid == 11 and result["odds_cs"] == "{}":
+            # Correct score: map T -> odds
+            # T=15 1-0, T=16 2-0, T=17 3-0, T=18 0-1, T=19 1-1,
+            # T=20 0-2, T=21 3-1+, T=22 2-1, T=23 0-0
+            cs_labels = {
+                15: "1-0", 16: "2-0", 17: "3-0",
+                18: "0-1", 19: "1-1", 20: "0-2",
+                21: "3-1+", 22: "2-1", 23: "0-0",
+            }
+            cs = {}
+            for t, label in cs_labels.items():
+                if t in by_t:
+                    cs[label] = by_t[t].get("C")
+            result["odds_cs"] = _json.dumps(cs)
+
+        elif gid == 19 and result["odds_fg_team1"] is None:
+            result["odds_fg_team1"] = by_t.get(180, {}).get("C")
+            result["odds_fg_team2"] = by_t.get(181, {}).get("C")
 
     # Derived: overround and margin-removed implied probabilities
     h = result["odds_home"]
@@ -196,10 +287,10 @@ def _parse_odds(ge: list) -> dict:
     if h and d and a:
         try:
             overround = (1/h) + (1/d) + (1/a)
-            result["overround"]     = round(overround, 6)
-            result["implied_home"]  = round((1/h) / overround, 6)
-            result["implied_draw"]  = round((1/d) / overround, 6)
-            result["implied_away"]  = round((1/a) / overround, 6)
+            result["overround"]    = round(overround, 6)
+            result["implied_home"] = round((1/h) / overround, 6)
+            result["implied_draw"] = round((1/d) / overround, 6)
+            result["implied_away"] = round((1/a) / overround, 6)
         except ZeroDivisionError:
             pass
 

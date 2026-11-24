@@ -58,14 +58,52 @@ CREATE TABLE IF NOT EXISTS matches (
     odds_home        NUMERIC(7,4) DEFAULT NULL,
     odds_draw        NUMERIC(7,4) DEFAULT NULL,
     odds_away        NUMERIC(7,4) DEFAULT NULL,
+
+    -- totals — all O/U lines stored as JSONB: [{line, over, under}, ...]
+    odds_total_lines JSONB        DEFAULT '[]',
+    -- main line extracted flat for fast querying
     odds_total_line  NUMERIC(5,2) DEFAULT NULL,
     odds_over        NUMERIC(7,4) DEFAULT NULL,
     odds_under       NUMERIC(7,4) DEFAULT NULL,
+
     odds_hcap_line   NUMERIC(5,2) DEFAULT NULL,
     odds_hcap_home   NUMERIC(7,4) DEFAULT NULL,
     odds_hcap_away   NUMERIC(7,4) DEFAULT NULL,
     odds_btts_yes    NUMERIC(7,4) DEFAULT NULL,
     odds_btts_no     NUMERIC(7,4) DEFAULT NULL,
+
+    -- half-time result (G=5): T=184 home, T=185 draw, T=186 away, T=187 no goal
+    odds_ht_home     NUMERIC(7,4) DEFAULT NULL,
+    odds_ht_draw     NUMERIC(7,4) DEFAULT NULL,
+    odds_ht_away     NUMERIC(7,4) DEFAULT NULL,
+    odds_ht_nogoal   NUMERIC(7,4) DEFAULT NULL,
+
+    -- half-time / full-time (G=18): T=188 HH, T=189 DD, T=190 AA
+    odds_htft_hh     NUMERIC(7,4) DEFAULT NULL,
+    odds_htft_dd     NUMERIC(7,4) DEFAULT NULL,
+    odds_htft_aa     NUMERIC(7,4) DEFAULT NULL,
+
+    -- team to score first (G=43): T=504 team1, T=505 team2
+    odds_first_team1 NUMERIC(7,4) DEFAULT NULL,
+    odds_first_team2 NUMERIC(7,4) DEFAULT NULL,
+
+    -- draw at half-time (G=44): T=506 yes, T=507 no
+    odds_ht_draw_yes NUMERIC(7,4) DEFAULT NULL,
+    odds_ht_draw_no  NUMERIC(7,4) DEFAULT NULL,
+
+    -- win to nil (G=20): T=388 team1 P=1, T=389 team2 P=1, T=390 0-0 P=1
+    odds_win_nil_1   NUMERIC(7,4) DEFAULT NULL,
+    odds_win_nil_2   NUMERIC(7,4) DEFAULT NULL,
+    odds_no_goal     NUMERIC(7,4) DEFAULT NULL,
+
+    -- correct score (G=11) — stored as JSONB: {T: odds, ...}
+    -- T=15 1-0, T=16 2-0, T=17 3-0, T=18 0-1, T=19 1-1,
+    -- T=20 0-2, T=21 3-1+, T=22 2-1, T=23 0-0
+    odds_cs          JSONB        DEFAULT '{}',
+
+    -- first goal market (G=19): T=180 team1, T=181 team2
+    odds_fg_team1    NUMERIC(7,4) DEFAULT NULL,
+    odds_fg_team2    NUMERIC(7,4) DEFAULT NULL,
 
     -- derived (margin-removed implied probabilities)
     overround        NUMERIC(8,6) DEFAULT NULL,
@@ -120,8 +158,27 @@ END;
 $$
 """
 
-# Future schema migrations — add tuples of (column_name, ALTER TABLE sql)
-MIGRATIONS = []
+# Schema migrations — applied automatically to existing databases
+MIGRATIONS = [
+    ("odds_total_lines", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_total_lines JSONB DEFAULT '[]'"),
+    ("odds_ht_home",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_home     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_ht_draw",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_draw     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_ht_away",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_away     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_ht_nogoal",   "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_nogoal   NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_htft_hh",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_htft_hh     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_htft_dd",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_htft_dd     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_htft_aa",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_htft_aa     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_first_team1", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_first_team1 NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_first_team2", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_first_team2 NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_ht_draw_yes", "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_draw_yes NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_ht_draw_no",  "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_ht_draw_no  NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_win_nil_1",   "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_win_nil_1   NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_win_nil_2",   "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_win_nil_2   NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_no_goal",     "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_no_goal     NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_cs",          "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_cs          JSONB DEFAULT '{}'"),
+    ("odds_fg_team1",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team1    NUMERIC(7,4) DEFAULT NULL"),
+    ("odds_fg_team2",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team2    NUMERIC(7,4) DEFAULT NULL"),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -251,9 +308,15 @@ class Database:
             team1_id, team2_id, team1_name, team2_name,
             team1_score, team2_score,
             odds_home, odds_draw, odds_away,
-            odds_total_line, odds_over, odds_under,
+            odds_total_lines, odds_total_line, odds_over, odds_under,
             odds_hcap_line, odds_hcap_home, odds_hcap_away,
             odds_btts_yes, odds_btts_no,
+            odds_ht_home, odds_ht_draw, odds_ht_away, odds_ht_nogoal,
+            odds_htft_hh, odds_htft_dd, odds_htft_aa,
+            odds_first_team1, odds_first_team2,
+            odds_ht_draw_yes, odds_ht_draw_no,
+            odds_win_nil_1, odds_win_nil_2, odds_no_goal,
+            odds_cs, odds_fg_team1, odds_fg_team2,
             overround, implied_home, implied_draw, implied_away
         ) VALUES (
             %(id)s, %(tourney_id)s, %(iteration)s, %(game_version)s,
@@ -261,9 +324,15 @@ class Database:
             %(team1_id)s, %(team2_id)s, %(team1_name)s, %(team2_name)s,
             %(team1_score)s, %(team2_score)s,
             %(odds_home)s, %(odds_draw)s, %(odds_away)s,
-            %(odds_total_line)s, %(odds_over)s, %(odds_under)s,
+            %(odds_total_lines)s, %(odds_total_line)s, %(odds_over)s, %(odds_under)s,
             %(odds_hcap_line)s, %(odds_hcap_home)s, %(odds_hcap_away)s,
             %(odds_btts_yes)s, %(odds_btts_no)s,
+            %(odds_ht_home)s, %(odds_ht_draw)s, %(odds_ht_away)s, %(odds_ht_nogoal)s,
+            %(odds_htft_hh)s, %(odds_htft_dd)s, %(odds_htft_aa)s,
+            %(odds_first_team1)s, %(odds_first_team2)s,
+            %(odds_ht_draw_yes)s, %(odds_ht_draw_no)s,
+            %(odds_win_nil_1)s, %(odds_win_nil_2)s, %(odds_no_goal)s,
+            %(odds_cs)s, %(odds_fg_team1)s, %(odds_fg_team2)s,
             %(overround)s, %(implied_home)s, %(implied_draw)s, %(implied_away)s
         )
         ON CONFLICT (id) DO NOTHING
