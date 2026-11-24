@@ -207,7 +207,7 @@ class Database:
                 FROM information_schema.columns
                 WHERE table_name = 'matches'
             """)
-            existing = {r[0] for r in cur.fetchall()}
+            existing = {r["column_name"] for r in cur.fetchall()}
             for col_name, alter_sql in MIGRATIONS:
                 if col_name not in existing:
                     cur.execute(alter_sql)
