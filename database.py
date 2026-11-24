@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS matches (
     id               BIGINT      PRIMARY KEY,
     tourney_id       INTEGER     NOT NULL DEFAULT 0,
     iteration        INTEGER     NOT NULL DEFAULT 0,
+    -- slot_index: position within the tourney's parallel schedule (0-based,
+    -- ordered by kickoff_time). Stable across iterations for the same team pairing.
+    slot_index       SMALLINT    NOT NULL DEFAULT 0,
     game_version     TEXT        NOT NULL DEFAULT '',
     league           TEXT        NOT NULL DEFAULT '',
     league_id        INTEGER     NOT NULL DEFAULT 0,
@@ -130,6 +133,7 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_status    ON matches (status)",
     "CREATE INDEX IF NOT EXISTS idx_league    ON matches (league)",
     "CREATE INDEX IF NOT EXISTS idx_tourney   ON matches (tourney_id, iteration)",
+    "CREATE INDEX IF NOT EXISTS idx_slot      ON matches (tourney_id, slot_index, iteration)",
     "CREATE INDEX IF NOT EXISTS idx_teams     ON matches (team1_id, team2_id)",
     "CREATE INDEX IF NOT EXISTS idx_kickoff   ON matches (kickoff_time)",
     "CREATE INDEX IF NOT EXISTS idx_iteration ON matches (iteration)",
@@ -184,6 +188,7 @@ MIGRATIONS = [
     ("odds_fg_team1",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team1    NUMERIC(7,4) DEFAULT NULL"),
     ("odds_fg_team2",    "ALTER TABLE matches ADD COLUMN IF NOT EXISTS odds_fg_team2    NUMERIC(7,4) DEFAULT NULL"),
     ("elapsed_seconds",  "ALTER TABLE matches ADD COLUMN IF NOT EXISTS elapsed_seconds  INTEGER DEFAULT NULL"),
+    ("slot_index",       "ALTER TABLE matches ADD COLUMN IF NOT EXISTS slot_index       SMALLINT NOT NULL DEFAULT 0"),
 ]
 
 
@@ -309,7 +314,7 @@ class Database:
         """
         sql = """
         INSERT INTO matches (
-            id, tourney_id, iteration, game_version,
+            id, tourney_id, iteration, slot_index, game_version,
             league, league_id, kickoff_time,
             team1_id, team2_id, team1_name, team2_name,
             team1_score, team2_score,
@@ -325,7 +330,7 @@ class Database:
             odds_cs, odds_fg_team1, odds_fg_team2,
             overround, implied_home, implied_draw, implied_away
         ) VALUES (
-            %(id)s, %(tourney_id)s, %(iteration)s, %(game_version)s,
+            %(id)s, %(tourney_id)s, %(iteration)s, %(slot_index)s, %(game_version)s,
             %(league)s, %(league_id)s, %(kickoff_time)s,
             %(team1_id)s, %(team2_id)s, %(team1_name)s, %(team2_name)s,
             %(team1_score)s, %(team2_score)s,
