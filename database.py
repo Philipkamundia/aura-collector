@@ -238,8 +238,8 @@ class Database:
         for attempt in range(3):
             try:
                 self._pool = psycopg2.pool.ThreadedConnectionPool(
-                    minconn=1,
-                    maxconn=4,
+                    minconn=2,
+                    maxconn=20,
                     dsn=self._dsn,
                 )
                 # Verify connectivity
@@ -289,10 +289,20 @@ class Database:
     def cursor(self):
         """
         Yields a psycopg2 RealDictCursor inside a transaction.
+        Retries up to 5 times with backoff if the pool is momentarily exhausted.
         Commits on success, rolls back on exception.
         Returns the connection to the pool afterwards.
         """
-        conn = self._pool.getconn()
+        conn = None
+        for attempt in range(5):
+            try:
+                conn = self._pool.getconn()
+                break
+            except psycopg2.pool.PoolError:
+                if attempt < 4:
+                    time.sleep(0.2 * (attempt + 1))
+                else:
+                    raise
         conn.autocommit = False
         cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
         try:
