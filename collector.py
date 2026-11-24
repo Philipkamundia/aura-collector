@@ -398,10 +398,20 @@ class MatchMonitor:
                 f"{record['team1_name']} vs {record['team2_name']} "
                 f"| {record['league']} "
                 f"| tourney={sched['tourney_id']} iter={sched['iteration']}"
+                + (" [NO ODDS]" if odds["odds_home"] is None else "")
             )
 
         else:
-            # ── Subsequent visit: check for new goals ────────────────────────
+            # ── Subsequent visit ─────────────────────────────────────────────
+
+            # Back-fill odds if we missed them on first contact
+            # (match was already in-play when first seen, odds were closed)
+            if row.get("odds_home") is None:
+                odds = _parse_odds(ge)
+                if odds["odds_home"] is not None:
+                    self.db.backfill_odds(self.match_id, odds)
+                    logger.info(f"[{self.match_id}] ✅ Back-filled odds")
+
             # Score delta — record each goal we witnessed with timing
             if t1_score > row["team1_score"]:
                 self.db.record_goal(

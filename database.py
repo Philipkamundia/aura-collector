@@ -345,6 +345,64 @@ class Database:
             logger.error(f"upsert_match({data.get('id')}): {e}")
             return False
 
+    def backfill_odds(self, match_id: int, odds: dict) -> bool:
+        """
+        Fill in odds columns that are still NULL (missed on first contact
+        because the match was already in-play when first seen).
+        Only updates columns that are currently NULL — never overwrites
+        a value already captured.
+        """
+        sql = """
+        UPDATE matches SET
+            odds_home        = COALESCE(odds_home,        %(odds_home)s),
+            odds_draw        = COALESCE(odds_draw,        %(odds_draw)s),
+            odds_away        = COALESCE(odds_away,        %(odds_away)s),
+            odds_total_lines = CASE WHEN odds_total_lines = '[]'::jsonb
+                                    THEN %(odds_total_lines)s::jsonb
+                                    ELSE odds_total_lines END,
+            odds_total_line  = COALESCE(odds_total_line,  %(odds_total_line)s),
+            odds_over        = COALESCE(odds_over,        %(odds_over)s),
+            odds_under       = COALESCE(odds_under,       %(odds_under)s),
+            odds_hcap_line   = COALESCE(odds_hcap_line,   %(odds_hcap_line)s),
+            odds_hcap_home   = COALESCE(odds_hcap_home,   %(odds_hcap_home)s),
+            odds_hcap_away   = COALESCE(odds_hcap_away,   %(odds_hcap_away)s),
+            odds_btts_yes    = COALESCE(odds_btts_yes,    %(odds_btts_yes)s),
+            odds_btts_no     = COALESCE(odds_btts_no,     %(odds_btts_no)s),
+            odds_ht_home     = COALESCE(odds_ht_home,     %(odds_ht_home)s),
+            odds_ht_draw     = COALESCE(odds_ht_draw,     %(odds_ht_draw)s),
+            odds_ht_away     = COALESCE(odds_ht_away,     %(odds_ht_away)s),
+            odds_ht_nogoal   = COALESCE(odds_ht_nogoal,   %(odds_ht_nogoal)s),
+            odds_htft_hh     = COALESCE(odds_htft_hh,     %(odds_htft_hh)s),
+            odds_htft_dd     = COALESCE(odds_htft_dd,     %(odds_htft_dd)s),
+            odds_htft_aa     = COALESCE(odds_htft_aa,     %(odds_htft_aa)s),
+            odds_first_team1 = COALESCE(odds_first_team1, %(odds_first_team1)s),
+            odds_first_team2 = COALESCE(odds_first_team2, %(odds_first_team2)s),
+            odds_ht_draw_yes = COALESCE(odds_ht_draw_yes, %(odds_ht_draw_yes)s),
+            odds_ht_draw_no  = COALESCE(odds_ht_draw_no,  %(odds_ht_draw_no)s),
+            odds_win_nil_1   = COALESCE(odds_win_nil_1,   %(odds_win_nil_1)s),
+            odds_win_nil_2   = COALESCE(odds_win_nil_2,   %(odds_win_nil_2)s),
+            odds_no_goal     = COALESCE(odds_no_goal,     %(odds_no_goal)s),
+            odds_cs          = CASE WHEN odds_cs = '{}'::jsonb
+                                    THEN %(odds_cs)s::jsonb
+                                    ELSE odds_cs END,
+            odds_fg_team1    = COALESCE(odds_fg_team1,    %(odds_fg_team1)s),
+            odds_fg_team2    = COALESCE(odds_fg_team2,    %(odds_fg_team2)s),
+            overround        = COALESCE(overround,        %(overround)s),
+            implied_home     = COALESCE(implied_home,     %(implied_home)s),
+            implied_draw     = COALESCE(implied_draw,     %(implied_draw)s),
+            implied_away     = COALESCE(implied_away,     %(implied_away)s)
+        WHERE id = %(id)s
+        """
+        try:
+            payload = dict(odds)
+            payload["id"] = match_id
+            with self.cursor() as cur:
+                cur.execute(sql, payload)
+            return True
+        except Exception as e:
+            logger.error(f"backfill_odds({match_id}): {e}")
+            return False
+
     def record_goal(self, match_id: int, goal: dict) -> bool:
         """
         Atomically append a goal to goal_data (JSONB) and increment
