@@ -317,11 +317,10 @@ class MatchMonitor:
     All state lives in the database — this object holds no match state itself.
     """
 
-    def __init__(self, match_id: int, db: Database, shutdown: threading.Event, slot_index: int = 0):
-        self.match_id   = match_id
-        self.db         = db
-        self.shutdown   = shutdown
-        self.slot_index = slot_index
+    def __init__(self, match_id: int, db: Database, shutdown: threading.Event):
+        self.match_id = match_id
+        self.db       = db
+        self.shutdown = shutdown
         self._timer: threading.Timer | None = None
 
     def start(self):
@@ -381,7 +380,7 @@ class MatchMonitor:
                 "id":           self.match_id,
                 "tourney_id":   sched["tourney_id"],
                 "iteration":    sched["iteration"],
-                "slot_index":   self.slot_index,
+                "slot_index":   0,
                 "game_version": sched["game_version"],
                 "league":       game.get("L", ""),
                 "league_id":    game.get("LI", 0),
@@ -514,31 +513,6 @@ class Engine:
             logger.warning("Games list unavailable.")
             return
 
-        # Build slot_index: within each (tourney_id, iteration) group,
-        # rank matches by kickoff_time ascending → slot 0 is the earliest.
-        # We derive tourney_id/iteration from the SC.S array in the list entry.
-        from collections import defaultdict
-        slot_map: dict[int, int] = {}  # match_id → slot_index
-
-        # Group by (tourney_id, iteration) using the list-level SC data
-        groups: dict[tuple, list] = defaultdict(list)
-        for entry in data["Value"]:
-            league = entry.get("L", "")
-            if not _league_ok(league):
-                continue
-            mid = entry.get("I")
-            if not mid:
-                continue
-            sc    = entry.get("SC", {})
-            sched = _parse_scheduler(sc)
-            kt    = entry.get("S", 0) or 0
-            groups[(sched["tourney_id"], sched["iteration"])].append((kt, mid))
-
-        for (tid, iteration), members in groups.items():
-            members.sort(key=lambda x: x[0])  # sort by kickoff_time
-            for idx, (kt, mid) in enumerate(members):
-                slot_map[mid] = idx
-
         new = 0
         for entry in data["Value"]:
             match_id = entry.get("I")
@@ -559,10 +533,7 @@ class Engine:
             if _game_starts_too_late(status, elapsed):
                 continue
 
-            monitor = MatchMonitor(
-                match_id, self.db, self.shutdown,
-                slot_index=slot_map.get(match_id, 0),
-            )
+            monitor = MatchMonitor(match_id, self.db, self.shutdown)
             self._monitors[match_id] = monitor
             monitor.start()
             new += 1
